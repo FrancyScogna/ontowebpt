@@ -1,11 +1,46 @@
 {
-  "$schema": "https://json.schemastore.org/chrome-manifest.json",
   "manifest_version": 3,
-  "version": "0.0.1",
   "name": "OntoWebPT",
-  "description": "An Extension.js example.",
+  "version": "1.0.0",
+  "description": "Estensione OntoWebPT",
+  "author": "Francesco Scognamiglio, Felice Micillo",
   "icons": {
-    "48": "images/extension_48.png"
+    "48": "images/icon_48.png"
   },
-  "author": "Your Name"
+  "action": {
+    "default_popup": "./index.html",
+    "default_icon": {
+      "48": "images/icon_48.png"
+    },
+    "default_title": "OntoWebPT"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "activeTab",
+    "cookies",
+    "notifications",
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "webRequest",
+    "background",
+    "debugger",
+    "scripting",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "*://*/*"
+  ]
 }

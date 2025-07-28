@@ -15,7 +15,11 @@
     "start": "extension start",
     "build": "extension build"
   },
-  "dependencies": {},
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.7.1"
+  },
   "devDependencies": {
     "extension": "^2.0.0-rc.38"
   }
