@@ -1,0 +1,22 @@
+{
+  "private": true,
+  "name": "OntoWebPT",
+  "description": "Estensione per supportare i penetration tester nelle operazioni di PT.",
+  "version": "0.0.1",
+  "author": {
+    "name": "Francesco Scognamiglio, Felice Micillo",
+    "email": "francosco@hotmail.it, felicemicillo13@gmail.com"
+  },
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev-chrome": "extension dev --polyfill --browser=chrome",
+    "dev-edge": "extension dev --polyfill --browser=edge",
+    "start": "extension start",
+    "build": "extension build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "extension": "^2.0.0-rc.38"
+  }
+}
