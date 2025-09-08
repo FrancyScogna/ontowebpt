@@ -81,6 +81,16 @@ class AnalyzerReactController {
     if (!analyzer_lastByTab || tabId == null) return null;
     return analyzer_lastByTab[tabId] ?? null;
   }
+
+  async getCurrentTabId() {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    return tab?.id ?? null;
+  }
+
+  async getSessionByTabMap() {
+    const { analyzer_lastByTab } = await browser.storage.session.get("analyzer_lastByTab");
+    return analyzer_lastByTab ?? {};
+  }
 }
 
 // ✅ esportiamo un'unica istanza (singleton)
