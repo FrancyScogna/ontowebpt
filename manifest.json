@@ -18,11 +18,14 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "content_scripts": [
+  "web_accessible_resources": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content_script.js"],
-      "run_at": "document_idle"
+      "resources": [
+        "content_script/*",
+        "content_script/*/*",
+        "content_script/*/*/*"
+      ],
+      "matches": ["<all_urls>"]
     }
   ],
   "permissions": [

@@ -1,0 +1,7 @@
+.app-div {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 800px;
+    height: 600px;
+}

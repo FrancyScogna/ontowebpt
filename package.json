@@ -12,15 +12,20 @@
   "scripts": {
     "dev-chrome": "extension dev --polyfill --browser=chrome",
     "dev-edge": "extension dev --polyfill --browser=edge",
-    "start": "extension start",
-    "build": "extension build"
+    "start-edge": "extension start --browser=edge",
+    "start-chrome": "extension start --browser=chrome",
+    "build-edge": "extension build --browser=edge",
+    "build-chrome": "extension build --browser=chrome",
+    "build-firefox": "extension build --browser=firefox"
   },
   "dependencies": {
+    "cheerio": "^1.1.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.7.1"
+    "react-router-dom": "^7.7.1",
+    "webextension-polyfill": "^0.12.0"
   },
   "devDependencies": {
-    "extension": "^2.0.0-rc.38"
+    "extension": "^2.0.4"
   }
 }
