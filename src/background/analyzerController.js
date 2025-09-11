@@ -26,7 +26,6 @@ class AnalyzerBackgroundController {
               this.sendMessageToReact({ type: "analyzer_runtimeScanUpdate", url, totals });
             },
             onComplete: (payload) => {
-              // payload: { ok, key, run }
               this.sendMessageToReact({ type: "analyzer_runtimeScanComplete", ...payload });
             }
           });
@@ -44,10 +43,7 @@ class AnalyzerBackgroundController {
         /* ---------- STATUS ---------- */
         case "analyzer_getScanStatus": {
           const s = this.engine.getRuntimeStatus();
-          sendResponse({
-            active: s.runtimeActive,    // compat con vecchia UI
-            ...s                        // { runtimeActive, startedAt, totalScans, pagesCount }
-          });
+          sendResponse({ active: s.runtimeActive, ...s });
           return true;
         }
 
@@ -60,6 +56,12 @@ class AnalyzerBackgroundController {
         /* ---------- ULTIMO RUNTIME SALVATO ---------- */
         case "analyzer_getLastRuntimeResults": {
           this.engine.getLastRuntimeResults().then(res => sendResponse(res));
+          return true;
+        }
+
+        /* ✅ TUTTI I RUNTIME SALVATI */
+        case "analyzer_getAllRuntimeResults": {
+          this.engine.getAllRuntimeResults().then(runs => sendResponse({ runs }));
           return true;
         }
 

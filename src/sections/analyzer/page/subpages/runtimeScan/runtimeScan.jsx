@@ -1,4 +1,4 @@
-import "./scan.css";
+import "./runtimeScan.css";
 import analyzerReactController from "../../../analyzerController";
 import { useEffect, useMemo, useState, useCallback } from "react";
 

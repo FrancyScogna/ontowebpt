@@ -8,7 +8,7 @@ class AnalyzerEngine {
     // ---- Stato RUNTIME ----
     this._runtimeActive = false;
     this._runtimeStartedAt = 0;
-    this._runtimeDataset = {}; // { [url]: Array<{ meta, results }> }
+    this._runtimeDataset = {};
     this._runtimeTotalScans = 0;
     this._runtimeCallbacks = { onUpdate: null, onComplete: null };
     this._onTabsUpdatedRef = null;
@@ -51,7 +51,7 @@ class AnalyzerEngine {
 
       // RUNTIME
       if (message.type === "analyzer_runtimeScanResult" && message.data?.html) {
-        if (!this._runtimeActive) return; // ignora se non attivo
+        if (!this._runtimeActive) return;
 
         try {
           const html = message.data.html;
@@ -68,15 +68,12 @@ class AnalyzerEngine {
           this._runtimeDataset[key].push({ meta, results });
           this._runtimeTotalScans += 1;
 
-          // callback live
           this._runtimeCallbacks.onUpdate?.(key, {
             totalScans: this._runtimeTotalScans,
             pagesCount: Object.keys(this._runtimeDataset).length,
             startedAt: this._runtimeStartedAt
           });
-        } catch (e) {
-          // no-op
-        }
+        } catch {}
       }
     });
   }
@@ -112,7 +109,7 @@ class AnalyzerEngine {
       } else {
         await browser.tabs.executeScript(tabId, { file: "content_script/analyzer/analyzer_injected.js" });
       }
-    } catch (err) {
+    } catch {
       this.resultCallback = null;
     }
   }
@@ -124,7 +121,7 @@ class AnalyzerEngine {
       .map(([key, value]) => ({ key, results: value }));
   }
 
-  // ---------- RUNTIME (public API usata dal Background) ----------
+  // ---------- RUNTIME (public API) ----------
   async startRuntimeScan({ onUpdate, onComplete } = {}) {
     if (this._runtimeActive) return;
 
@@ -134,7 +131,6 @@ class AnalyzerEngine {
     this._runtimeTotalScans = 0;
     this._runtimeCallbacks = { onUpdate: onUpdate || null, onComplete: onComplete || null };
 
-    // listener tab aggiornati
     this._onTabsUpdatedRef = async (tabId, changeInfo, tab) => {
       if (!this._runtimeActive) return;
       if (changeInfo.status === "complete" && tab?.url && /^https?:/i.test(tab.url)) {
@@ -143,7 +139,6 @@ class AnalyzerEngine {
     };
     try { browser.tabs.onUpdated.addListener(this._onTabsUpdatedRef); } catch {}
 
-    // inietta subito su tutte le tab http/https già aperte
     try {
       const tabs = await browser.tabs.query({});
       for (const t of tabs) {
@@ -153,7 +148,6 @@ class AnalyzerEngine {
       }
     } catch {}
 
-    // ping iniziale
     this._runtimeCallbacks.onUpdate?.(null, {
       totalScans: 0,
       pagesCount: 0,
@@ -173,16 +167,13 @@ class AnalyzerEngine {
       dataset: this._runtimeDataset
     };
 
-    // salva in UN SOLO oggetto
     const key = `analyzerRuntime_${stoppedAt}`;
     await browser.storage.local.set({ [key]: run, analyzerRuntime_lastKey: key }).catch(() => {});
 
-    // cleanup
     this._runtimeActive = false;
     try { this._onTabsUpdatedRef && browser.tabs.onUpdated.removeListener(this._onTabsUpdatedRef); } catch {}
     this._onTabsUpdatedRef = null;
 
-    // callback complete
     this._runtimeCallbacks.onComplete?.({ ok: true, key, run });
 
     return { ok: true, key, run };
@@ -210,6 +201,28 @@ class AnalyzerEngine {
     return key ? { key, run: all[key] } : { key: null, run: null };
   }
 
+  // ✅ TUTTI I RUNTIME SALVATI (più recente → più vecchio), ESCLUDENDO lastKey
+  async getAllRuntimeResults() {
+    const all = await browser.storage.local.get(null);
+
+    const items = Object.entries(all)
+      // prendi solo chiavi del tipo analyzerRuntime_<timestamp numerico>
+      .filter(([key]) => {
+        if (!key.startsWith("analyzerRuntime_")) return false;
+        const suffix = key.split("_")[1];
+        return /^\d+$/.test(suffix); // esclude analyzerRuntime_lastKey
+      })
+      .map(([key, run]) => ({ key, run }));
+
+    items.sort((a, b) => {
+      const ta = Number(a.key.split("_")[1]);
+      const tb = Number(b.key.split("_")[1]);
+      return tb - ta;
+    });
+
+    return items;
+  }
+
   // ---------- Iniezione script runtime ----------
   async _injectRuntimeScript(tabId) {
     try {
@@ -221,12 +234,10 @@ class AnalyzerEngine {
       } else {
         await browser.tabs.executeScript(tabId, { file: "content_script/analyzer/analyzer_runtime_injected.js" });
       }
-    } catch {
-      // alcune pagine sono non iniettabili: ignora
-    }
+    } catch {}
   }
 
-  // ---------- Parser HTML (stesso schema della one-time) ----------
+  // ---------- Parser HTML ----------
   processHtml(html) {
     const $ = cheerio.load(html);
 

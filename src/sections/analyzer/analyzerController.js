@@ -53,13 +53,19 @@ class AnalyzerReactController {
     return browser.runtime.sendMessage({ type: "analyzer_getScanStatus" });
   }
   async getLastRuntimeResults() {
-    return browser.runtime.sendMessage({ type: "analyzer_getLastRuntimeResults" }); // { key, run } | { key:null, run:null }
+    return browser.runtime.sendMessage({ type: "analyzer_getLastRuntimeResults" });
   }
 
   // Archive one-time
   async getLocalScanResults() {
     const response = await browser.runtime.sendMessage({ type: "analyzer_getLocalScanResults" });
     return response.localResults;
+  }
+
+  // ✅ Archive runtime – tutti i run
+  async getAllRuntimeResults() {
+    const response = await browser.runtime.sendMessage({ type: "analyzer_getAllRuntimeResults" });
+    return response.runs; // Array<{ key, run }>
   }
 
   // Sessione (volatile)

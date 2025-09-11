@@ -1,4 +1,4 @@
-import "./scan.css";
+import "./oneTimeScan.css";
 import analyzerReactController from "../../../analyzerController";
 import browser from "webextension-polyfill";
 import { useEffect, useMemo, useState } from "react";
