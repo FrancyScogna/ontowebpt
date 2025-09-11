@@ -3,7 +3,6 @@ import AnalyzerEngine from "./analyzer/analyzerEngine.js";
 
 class AnalyzerBackgroundController {
   constructor() {
-    this.runtimeScanActive = false;
     this.engine = new AnalyzerEngine();
     this.initListener();
   }
@@ -12,40 +11,57 @@ class AnalyzerBackgroundController {
     console.log("Init controller background");
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       switch (message.type) {
-        case "analyzer_startOneTimeScan":
-          console.log("[Background] Received: startOneTimeScan");
+        /* ---------- ONE-TIME ---------- */
+        case "analyzer_startOneTimeScan": {
           this.engine.runOneTimeScan(message.tabId, (data) => {
-            console.log("[Background] One-time scan completed, sending result to React");
-            this.sendMessageToReact({
-              type: "analyzer_scanComplete",
-              data
-            });
+            this.sendMessageToReact({ type: "analyzer_scanComplete", data });
           });
           break;
+        }
 
-        case "analyzer_startRuntimeScan":
-          console.log("[Background] Received: startRuntimeScan");
-          this.runtimeScanActive = true;
-          this.sendMessageToReact({ type: "analyzer_runtimeScanUpdate", url: "https://esempio.com", data: "Runtime scan iniziata (mock)" });
+        /* ---------- RUNTIME START ---------- */
+        case "analyzer_startRuntimeScan": {
+          this.engine.startRuntimeScan({
+            onUpdate: (url, totals) => {
+              this.sendMessageToReact({ type: "analyzer_runtimeScanUpdate", url, totals });
+            },
+            onComplete: (payload) => {
+              // payload: { ok, key, run }
+              this.sendMessageToReact({ type: "analyzer_runtimeScanComplete", ...payload });
+            }
+          });
           break;
+        }
 
-        case "analyzer_stopRuntimeScan":
-          console.log("[Background] Received: stopRuntimeScan");
-          this.runtimeScanActive = false;
-          this.sendMessageToReact({ type: "analyzer_runtimeScanComplete", allResults: ["Pagina 1", "Pagina 2"] });
+        /* ---------- RUNTIME STOP ---------- */
+        case "analyzer_stopRuntimeScan": {
+          this.engine.stopRuntimeScan().then((payload) => {
+            this.sendMessageToReact({ type: "analyzer_runtimeScanComplete", ...payload });
+          });
           break;
+        }
 
-        case "analyzer_getScanStatus":
-          console.log("[Background] Received: getScanStatus");
-          sendResponse({ active: this.runtimeScanActive });
-          return true;
-
-        case "analyzer_getLocalScanResults":
-          console.log("[Background] Received: getLocalScanResults");
-          this.engine.getLocalScanResults().then(localResults => {
-            sendResponse({ localResults });
+        /* ---------- STATUS ---------- */
+        case "analyzer_getScanStatus": {
+          const s = this.engine.getRuntimeStatus();
+          sendResponse({
+            active: s.runtimeActive,    // compat con vecchia UI
+            ...s                        // { runtimeActive, startedAt, totalScans, pagesCount }
           });
           return true;
+        }
+
+        /* ---------- ARCHIVIO ONE-TIME ---------- */
+        case "analyzer_getLocalScanResults": {
+          this.engine.getLocalScanResults().then(localResults => sendResponse({ localResults }));
+          return true;
+        }
+
+        /* ---------- ULTIMO RUNTIME SALVATO ---------- */
+        case "analyzer_getLastRuntimeResults": {
+          this.engine.getLastRuntimeResults().then(res => sendResponse(res));
+          return true;
+        }
 
         default:
           console.warn("[Background] Unknown type:", message.type);

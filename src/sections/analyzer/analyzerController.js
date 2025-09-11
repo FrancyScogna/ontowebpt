@@ -2,7 +2,7 @@ import browser from "webextension-polyfill";
 
 class AnalyzerReactController {
   constructor() {
-    this.subscribers = new Set(); // ogni subscriber è un oggetto { onScanComplete, onRuntimeScanUpdate, ... }
+    this.subscribers = new Set();
     this._initMessageListenerOnce();
   }
 
@@ -17,82 +17,70 @@ class AnalyzerReactController {
             sub.onScanComplete?.(message.data);
             break;
           case "analyzer_runtimeScanUpdate":
-            sub.onRuntimeScanUpdate?.(message.url, message.data);
+            sub.onRuntimeScanUpdate?.(message.url, message.totals);
             break;
           case "analyzer_runtimeScanComplete":
-            sub.onRuntimeScanComplete?.(message.allResults);
+            sub.onRuntimeScanComplete?.(message); // { ok, key, run }
             break;
           case "analyzer_scanError":
             sub.onScanError?.(message.message);
             break;
           default:
-            // ignora
             break;
         }
       }
     });
   }
 
-  /*
-   * Registra i callback e restituisce una funzione di unsubscribe.
-   * Esempio:
-   *   const off = controller.onMessage({ onScanComplete: data => {...} })
-   *   // ...poi
-   *   off();
-  */
   onMessage(callbacks) {
     this.subscribers.add(callbacks);
     return () => this.subscribers.delete(callbacks);
   }
 
+  // One-time
   sendStartOneTimeScan(tabId) {
     browser.runtime.sendMessage({ type: "analyzer_startOneTimeScan", tabId });
   }
 
+  // Runtime
   sendStartRuntimeScan() {
     browser.runtime.sendMessage({ type: "analyzer_startRuntimeScan" });
   }
-
   sendStopRuntimeScan() {
     browser.runtime.sendMessage({ type: "analyzer_stopRuntimeScan" });
   }
-
   async getScanStatus() {
     return browser.runtime.sendMessage({ type: "analyzer_getScanStatus" });
   }
+  async getLastRuntimeResults() {
+    return browser.runtime.sendMessage({ type: "analyzer_getLastRuntimeResults" }); // { key, run } | { key:null, run:null }
+  }
 
-  // --- Persistente (Archive)
+  // Archive one-time
   async getLocalScanResults() {
-    const response = await browser.runtime.sendMessage({
-      type: "analyzer_getLocalScanResults"
-    });
+    const response = await browser.runtime.sendMessage({ type: "analyzer_getLocalScanResults" });
     return response.localResults;
   }
 
-  // --- Sessione corrente (volatile)
+  // Sessione (volatile)
   async getSessionLastResult() {
     const { analyzer_lastResult } = await browser.storage.session.get("analyzer_lastResult");
     return analyzer_lastResult ?? null;
   }
-
   async getSessionLastResultForTab(tabId) {
     const { analyzer_lastByTab } = await browser.storage.session.get("analyzer_lastByTab");
-    console.log("tab", analyzer_lastByTab)
     if (!analyzer_lastByTab || tabId == null) return null;
     return analyzer_lastByTab[tabId] ?? null;
   }
-
   async getCurrentTabId() {
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
     return tab?.id ?? null;
   }
-
   async getSessionByTabMap() {
     const { analyzer_lastByTab } = await browser.storage.session.get("analyzer_lastByTab");
     return analyzer_lastByTab ?? {};
   }
 }
 
-// ✅ esportiamo un'unica istanza (singleton)
 const analyzerReactController = new AnalyzerReactController();
 export default analyzerReactController;

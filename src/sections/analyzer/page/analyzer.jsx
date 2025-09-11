@@ -9,7 +9,8 @@ function Analyzer() {
       <div className="analyzer-div">
         <h1>Analyzer Section</h1>
         <div className="navigation-div">
-          <button onClick={() => navigate("/analyzer")}>Scan</button>
+          <button onClick={() => navigate("/analyzer")}>One-Time Scan</button>
+          <button onClick={() => navigate("/analyzer/runtime")}>Runtime Scan</button>
           <button onClick={() => navigate("/analyzer/archive")}>Archive</button>
         </div>
         <Outlet />

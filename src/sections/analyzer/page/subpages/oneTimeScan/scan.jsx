@@ -83,7 +83,7 @@ function SimpleTable({ cols = [], rows = [] }) {
 
 /* ---------- Component principale ---------- */
 
-function ScanAnalyzer() {
+function OneTimeScanAnalyzer() {
   const [oneTimeLoading, setOneTimeLoading] = useState(false);
   const [oneTimeActive, setOneTimeActive] = useState(false);
   const [results, setResults] = useState(null);
@@ -192,18 +192,11 @@ function ScanAnalyzer() {
 
   return (
     <div className="scanAnalyzer-div">
-      <h1>Scan</h1>
+      <h1>One-Time Scan</h1>
 
       <div className="scan-actions">
         <button onClick={handleOneTimeScan} disabled={oneTimeLoading}>
           {oneTimeLoading ? "Scanning..." : "Start One-Time Scan"}
-        </button>
-        <button
-          onClick={handleRuntimeScan}
-          disabled={oneTimeActive || oneTimeLoading}
-          title={oneTimeActive || oneTimeLoading ? "Disabilitato durante la one-time" : ""}
-        >
-          Start Runtime Scan
         </button>
       </div>
 
@@ -477,4 +470,4 @@ function ScanAnalyzer() {
   );
 }
 
-export default ScanAnalyzer;
+export default OneTimeScanAnalyzer;

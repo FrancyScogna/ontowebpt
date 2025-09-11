@@ -4,17 +4,24 @@ import browser from "webextension-polyfill";
 class AnalyzerEngine {
   constructor() {
     this.resultCallback = null;
+
+    // ---- Stato RUNTIME ----
+    this._runtimeActive = false;
+    this._runtimeStartedAt = 0;
+    this._runtimeDataset = {}; // { [url]: Array<{ meta, results }> }
+    this._runtimeTotalScans = 0;
+    this._runtimeCallbacks = { onUpdate: null, onComplete: null };
+    this._onTabsUpdatedRef = null;
+
     this.initListener();
   }
 
   initListener() {
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      // ONE-TIME
       if (message.type === "analyzer_scanResult" && message.data?.html) {
-        console.log("[Engine] Received raw HTML from injected script");
-
         const results = this.processHtml(message.data.html);
 
-        // ---- metadati utili per archive e sessione
         const timestamp = Date.now();
         const meta = {
           timestamp,
@@ -22,18 +29,10 @@ class AnalyzerEngine {
           url: sender?.tab?.url ?? null,
         };
 
-        // ---- salvataggio PERSISTENTE (Archive)
-        // schema: analyzerResults_<timestamp> = { meta, results }
         const key = `analyzerResults_${timestamp}`;
-        browser.storage.local.set({ [key]: { meta, results } })
-          .then(() => console.log(`[Engine] Results saved to storage.local with key ${key}`))
-          .catch((err) => console.error("[Engine] Failed to save to storage.local:", err));
+        browser.storage.local.set({ [key]: { meta, results } }).catch(() => {});
 
-        // ---- salvataggio di SESSIONE (volatile, solo per la sessione corrente del browser)
-        // 1) ultimo globale della sessione
         this._setSessionValue("analyzer_lastResult", { meta, results });
-
-        // 2) ultimo per-tab (mappa tabId -> snapshot)
         if (meta.tabId != null) {
           this._updateSessionMap("analyzer_lastByTab", (map) => {
             map[meta.tabId] = { meta, results };
@@ -41,35 +40,55 @@ class AnalyzerEngine {
           });
         }
 
-        // callback one-shot verso il background controller
         if (this.resultCallback) {
           this.resultCallback(results);
           this.resultCallback = null;
         }
 
-        sendResponse({ status: "ok", received: true });
+        sendResponse?.({ status: "ok", received: true });
         return true;
+      }
+
+      // RUNTIME
+      if (message.type === "analyzer_runtimeScanResult" && message.data?.html) {
+        if (!this._runtimeActive) return; // ignora se non attivo
+
+        try {
+          const html = message.data.html;
+          const tabId = sender?.tab?.id ?? null;
+          const url = message.data.url || sender?.tab?.url || null;
+          const title = message.data.title || sender?.tab?.title || null;
+          const timestamp = message.data.timestamp || Date.now();
+
+          const results = this.processHtml(html);
+          const meta = { tabId, url, title: results?.head?.title || title || null, timestamp };
+
+          const key = meta.url || "(url_sconosciuto)";
+          if (!this._runtimeDataset[key]) this._runtimeDataset[key] = [];
+          this._runtimeDataset[key].push({ meta, results });
+          this._runtimeTotalScans += 1;
+
+          // callback live
+          this._runtimeCallbacks.onUpdate?.(key, {
+            totalScans: this._runtimeTotalScans,
+            pagesCount: Object.keys(this._runtimeDataset).length,
+            startedAt: this._runtimeStartedAt
+          });
+        } catch (e) {
+          // no-op
+        }
       }
     });
   }
 
-  // helper: set semplice su storage.session con fallback silenzioso se non disponibile
+  // ---------- Helpers storage.session ----------
   async _setSessionValue(key, value) {
     try {
-      console.log("set", browser.storage.session.set);
       if (browser.storage?.session?.set) {
         await browser.storage.session.set({ [key]: value });
-      } else {
-        // opzionale: potresti tenerne copia in memoria se vuoi supportare browser senza storage.session
-        // this._sessionFallback = this._sessionFallback || {};
-        // this._sessionFallback[key] = value;
       }
-    } catch (e) {
-      console.warn(`[Engine] storage.session.set failed for ${key}:`, e);
-    }
+    } catch {}
   }
-
-  // helper: get+mutate su oggetto mappa in storage.session
   async _updateSessionMap(key, mutator) {
     try {
       if (browser.storage?.session?.get && browser.storage?.session?.set) {
@@ -77,58 +96,144 @@ class AnalyzerEngine {
         const map = obj?.[key] ?? {};
         const next = mutator({ ...map });
         await browser.storage.session.set({ [key]: next });
-      } else {
-        // opzionale: fallback in memoria
-        // this._sessionFallback = this._sessionFallback || {};
-        // const map = this._sessionFallback[key] || {};
-        // this._sessionFallback[key] = mutator({ ...map });
       }
-    } catch (e) {
-      console.warn(`[Engine] storage.session update failed for ${key}:`, e);
-    }
+    } catch {}
   }
 
+  // ---------- ONE-TIME ----------
   async runOneTimeScan(tabId, callback) {
-    console.log("[Engine] Starting one-time scan on tab", tabId);
     this.resultCallback = callback;
-
     try {
       if (browser.scripting) {
-        // Chrome
         await browser.scripting.executeScript({
           target: { tabId },
           files: ["content_script/analyzer/analyzer_injected.js"]
         });
       } else {
-        // Firefox (MV2/compat)
-        await browser.tabs.executeScript(tabId, {
-          file: "content_script/analyzer/analyzer_injected.js"
-        });
+        await browser.tabs.executeScript(tabId, { file: "content_script/analyzer/analyzer_injected.js" });
       }
     } catch (err) {
-      console.error("[Engine] Failed to inject script:", err);
       this.resultCallback = null;
     }
   }
 
   async getLocalScanResults() {
-    const all = await browser.storage.local.get(null); // null => tutte le chiavi
-    const scans = Object.entries(all)
+    const all = await browser.storage.local.get(null);
+    return Object.entries(all)
       .filter(([key]) => key.startsWith("analyzerResults_"))
-      // ora value è { meta, results }
       .map(([key, value]) => ({ key, results: value }));
-    return scans;
   }
 
+  // ---------- RUNTIME (public API usata dal Background) ----------
+  async startRuntimeScan({ onUpdate, onComplete } = {}) {
+    if (this._runtimeActive) return;
+
+    this._runtimeActive = true;
+    this._runtimeStartedAt = Date.now();
+    this._runtimeDataset = {};
+    this._runtimeTotalScans = 0;
+    this._runtimeCallbacks = { onUpdate: onUpdate || null, onComplete: onComplete || null };
+
+    // listener tab aggiornati
+    this._onTabsUpdatedRef = async (tabId, changeInfo, tab) => {
+      if (!this._runtimeActive) return;
+      if (changeInfo.status === "complete" && tab?.url && /^https?:/i.test(tab.url)) {
+        await this._injectRuntimeScript(tabId);
+      }
+    };
+    try { browser.tabs.onUpdated.addListener(this._onTabsUpdatedRef); } catch {}
+
+    // inietta subito su tutte le tab http/https già aperte
+    try {
+      const tabs = await browser.tabs.query({});
+      for (const t of tabs) {
+        if (t?.id && t?.url && /^https?:/i.test(t.url)) {
+          await this._injectRuntimeScript(t.id);
+        }
+      }
+    } catch {}
+
+    // ping iniziale
+    this._runtimeCallbacks.onUpdate?.(null, {
+      totalScans: 0,
+      pagesCount: 0,
+      startedAt: this._runtimeStartedAt
+    });
+  }
+
+  async stopRuntimeScan() {
+    if (!this._runtimeActive) return { ok: false, error: "Runtime non attivo" };
+
+    const stoppedAt = Date.now();
+    const run = {
+      startedAt: this._runtimeStartedAt,
+      stoppedAt,
+      totalScans: this._runtimeTotalScans,
+      pagesCount: Object.keys(this._runtimeDataset).length,
+      dataset: this._runtimeDataset
+    };
+
+    // salva in UN SOLO oggetto
+    const key = `analyzerRuntime_${stoppedAt}`;
+    await browser.storage.local.set({ [key]: run, analyzerRuntime_lastKey: key }).catch(() => {});
+
+    // cleanup
+    this._runtimeActive = false;
+    try { this._onTabsUpdatedRef && browser.tabs.onUpdated.removeListener(this._onTabsUpdatedRef); } catch {}
+    this._onTabsUpdatedRef = null;
+
+    // callback complete
+    this._runtimeCallbacks.onComplete?.({ ok: true, key, run });
+
+    return { ok: true, key, run };
+  }
+
+  getRuntimeStatus() {
+    return {
+      runtimeActive: this._runtimeActive,
+      startedAt: this._runtimeStartedAt,
+      totalScans: this._runtimeTotalScans,
+      pagesCount: Object.keys(this._runtimeDataset).length
+    };
+  }
+
+  async getLastRuntimeResults() {
+    const all = await browser.storage.local.get(null);
+    let key = all.analyzerRuntime_lastKey || null;
+    if (!key) {
+      const keys = Object.keys(all).filter(k => k.startsWith("analyzerRuntime_"));
+      if (keys.length) {
+        keys.sort((a, b) => Number(b.split("_")[1]) - Number(a.split("_")[1]));
+        key = keys[0];
+      }
+    }
+    return key ? { key, run: all[key] } : { key: null, run: null };
+  }
+
+  // ---------- Iniezione script runtime ----------
+  async _injectRuntimeScript(tabId) {
+    try {
+      if (browser.scripting) {
+        await browser.scripting.executeScript({
+          target: { tabId },
+          files: ["content_script/analyzer/analyzer_runtime_injected.js"]
+        });
+      } else {
+        await browser.tabs.executeScript(tabId, { file: "content_script/analyzer/analyzer_runtime_injected.js" });
+      }
+    } catch {
+      // alcune pagine sono non iniettabili: ignora
+    }
+  }
+
+  // ---------- Parser HTML (stesso schema della one-time) ----------
   processHtml(html) {
     const $ = cheerio.load(html);
 
     function getDepth(node, depth = 0) {
       const children = $(node).children();
       if (children.length === 0) return depth;
-      return Math.max(
-        ...children.map((_, child) => getDepth(child, depth + 1)).get()
-      );
+      return Math.max(...children.map((_, child) => getDepth(child, depth + 1)).get());
     }
 
     return {
@@ -157,12 +262,10 @@ class AnalyzerEngine {
           h5: $("h5").map((i, el) => $(el).text().trim()).get(),
           h6: $("h6").map((i, el) => $(el).text().trim()).get(),
         },
-
         links: $("a").map((i, el) => ({
           href: $(el).attr("href"),
           text: $(el).text().trim()
         })).get(),
-
         forms: $("form").map((i, form) => ({
           action: $(form).attr("action") || null,
           method: $(form).attr("method") || "GET",
@@ -174,32 +277,26 @@ class AnalyzerEngine {
             placeholder: $(el).attr("placeholder") || null
           })).get()
         })).get(),
-
         images: $("img").map((i, el) => ({
           src: $(el).attr("src"),
           alt: $(el).attr("alt") || ""
         })).get(),
-
         videos: $("video").map((i, el) => ({
           src: $(el).attr("src") || null,
           controls: $(el).attr("controls") !== undefined
         })).get(),
-
         audios: $("audio").map((i, el) => ({
           src: $(el).attr("src") || null,
           controls: $(el).attr("controls") !== undefined
         })).get(),
-
         iframes: $("iframe").map((i, el) => ({
           src: $(el).attr("src") || null,
           title: $(el).attr("title") || null
         })).get(),
-
         lists: $("ul, ol").map((i, el) => ({
           type: el.tagName,
           items: $(el).find("li").map((j, li) => $(li).text().trim()).get()
         })).get(),
-
         tables: $("table").map((i, el) => ({
           rows: $(el).find("tr").map((j, row) => (
             $(row).find("th, td").map((k, cell) => $(cell).text().trim()).get()
