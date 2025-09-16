@@ -135,10 +135,10 @@ class AnalyzerEngine {
         if (browser.scripting) {
           await browser.scripting.executeScript({
             target: { tabId },
-            files: ["content_script/analyzer/analyzer_injected.js"]
+            files: ["content_script/analyzer/analyzer_onetime_injected.js"]
           });
         } else {
-          await browser.tabs.executeScript(tabId, { file: "content_script/analyzer/analyzer_injected.js" });
+          await browser.tabs.executeScript(tabId, { file: "content_script/analyzer/analyzer_onetime_injected.js" });
         }
       } catch (e) {
         return finish(new Error("Iniezione non riuscita su questa pagina."));
