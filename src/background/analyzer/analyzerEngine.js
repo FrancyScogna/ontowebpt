@@ -41,8 +41,9 @@ class AnalyzerEngine {
         }
 
         if (this.resultCallback) {
-          this.resultCallback(results);
+          const cb = this.resultCallback;
           this.resultCallback = null;
+          try { cb(results); } catch {}
         }
 
         sendResponse?.({ status: "ok", received: true });
@@ -98,20 +99,56 @@ class AnalyzerEngine {
   }
 
   // ---------- ONE-TIME ----------
+  _isInjectableUrl(url = "") {
+    // consenti solo http/https; blocca edge://, chrome://, about:, chrome-extension://, ecc.
+    return /^https?:\/\//i.test(url);
+  }
+
   async runOneTimeScan(tabId, callback) {
-    this.resultCallback = callback;
-    try {
-      if (browser.scripting) {
-        await browser.scripting.executeScript({
-          target: { tabId },
-          files: ["content_script/analyzer/analyzer_injected.js"]
-        });
-      } else {
-        await browser.tabs.executeScript(tabId, { file: "content_script/analyzer/analyzer_injected.js" });
-      }
-    } catch {
-      this.resultCallback = null;
+    // ritorna una Promise che si risolve con i risultati o si rifiuta con un errore
+    const tab = await browser.tabs.get(tabId).catch(() => null);
+    const url = tab?.url || "";
+
+    if (!this._isInjectableUrl(url)) {
+      throw new Error("Questa pagina non consente l'iniezione del content script (protocollo non supportato).");
     }
+
+    return new Promise(async (resolve, reject) => {
+      let settled = false;
+      const finish = (err, data) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.resultCallback = null;
+        if (err) reject(err); else resolve(data);
+      };
+
+      // Wrappa il callback utente per risolvere la Promise quando arrivano i risultati
+      const userCb = callback;
+      this.resultCallback = (data) => {
+        try { userCb?.(data); } catch {}
+        finish(null, data);
+      };
+
+      // Prova l'injection
+      try {
+        if (browser.scripting) {
+          await browser.scripting.executeScript({
+            target: { tabId },
+            files: ["content_script/analyzer/analyzer_injected.js"]
+          });
+        } else {
+          await browser.tabs.executeScript(tabId, { file: "content_script/analyzer/analyzer_injected.js" });
+        }
+      } catch (e) {
+        return finish(new Error("Iniezione non riuscita su questa pagina."));
+      }
+
+      // Timeout se lo script non risponde (es. CSP/errore runtime)
+      const timer = setTimeout(() => {
+        finish(new Error("Timeout: la pagina non ha risposto alla scansione."));
+      }, 8000);
+    });
   }
 
   async getLocalScanResults() {
@@ -201,29 +238,20 @@ class AnalyzerEngine {
     return key ? { key, run: all[key] } : { key: null, run: null };
   }
 
-  // ✅ TUTTI I RUNTIME SALVATI (più recente → più vecchio), ESCLUDENDO lastKey
   async getAllRuntimeResults() {
     const all = await browser.storage.local.get(null);
-
     const items = Object.entries(all)
-      // prendi solo chiavi del tipo analyzerRuntime_<timestamp numerico>
       .filter(([key]) => {
         if (!key.startsWith("analyzerRuntime_")) return false;
         const suffix = key.split("_")[1];
-        return /^\d+$/.test(suffix); // esclude analyzerRuntime_lastKey
+        return /^\d+$/.test(suffix);
       })
       .map(([key, run]) => ({ key, run }));
 
-    items.sort((a, b) => {
-      const ta = Number(a.key.split("_")[1]);
-      const tb = Number(b.key.split("_")[1]);
-      return tb - ta;
-    });
-
+    items.sort((a, b) => Number(b.key.split("_")[1]) - Number(a.key.split("_")[1]));
     return items;
   }
 
-  // ---------- Iniezione script runtime ----------
   async _injectRuntimeScript(tabId) {
     try {
       if (browser.scripting) {

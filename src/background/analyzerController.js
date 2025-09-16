@@ -13,9 +13,18 @@ class AnalyzerBackgroundController {
       switch (message.type) {
         /* ---------- ONE-TIME ---------- */
         case "analyzer_startOneTimeScan": {
-          this.engine.runOneTimeScan(message.tabId, (data) => {
-            this.sendMessageToReact({ type: "analyzer_scanComplete", data });
-          });
+          this.engine
+            .runOneTimeScan(message.tabId, (data) => {
+              this.sendMessageToReact({ type: "analyzer_scanComplete", data });
+            })
+            .catch((error) => {
+              this.sendMessageToReact({
+                type: "analyzer_scanError",
+                message:
+                  error?.message ||
+                  "Impossibile eseguire la scansione su questa pagina.",
+              });
+            });
           break;
         }
 
